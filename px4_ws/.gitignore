@@ -1,0 +1,14 @@
+build/
+install/
+log/
+
+.agents/
+.codex/
+.vscode/
+
+*.bag
+*.db3
+*.pyc
+__pycache__/
+
+.git-nested-backups/
