@@ -17,8 +17,6 @@ public:
 
         invert_y_ = this->declare_parameter<bool>("invert_y", true);
         invert_z_ = this->declare_parameter<bool>("invert_z", true);
-        publish_orientation_ = this->declare_parameter<bool>("publish_orientation", false);
-        orientation_variance_ = static_cast<float>(this->declare_parameter<double>("orientation_variance", 0.05));
 
         auto sensor_qos = rclcpp::SensorDataQoS();
         auto px4_qos = rclcpp::QoS(10).best_effort();
@@ -35,7 +33,6 @@ public:
         RCLCPP_INFO(this->get_logger(), "mocap_to_px4_bridge started.");
         RCLCPP_INFO(this->get_logger(), "Subscribe: %s", mocap_topic_.c_str());
         RCLCPP_INFO(this->get_logger(), "Publish  : %s", px4_odom_topic_.c_str());
-        RCLCPP_INFO(this->get_logger(), "Publish q: %s", publish_orientation_ ? "true" : "false");
     }
 
 private:
@@ -77,51 +74,11 @@ private:
 	odom.position[1] = static_cast<float>(invert_y_ ? -raw_y : raw_y);
 	odom.position[2] = static_cast<float>(invert_z_ ? -raw_z : raw_z);
 
-        bool orientation_valid = false;
-
-        if (publish_orientation_) {
-            float qx = static_cast<float>(msg->pose.orientation.x);
-            float qy = static_cast<float>(msg->pose.orientation.y);
-            float qz = static_cast<float>(msg->pose.orientation.z);
-            float qw = static_cast<float>(msg->pose.orientation.w);
-
-            const float q_norm = std::sqrt(qw * qw + qx * qx + qy * qy + qz * qz);
-
-            if (std::isfinite(q_norm) && q_norm > 1e-6f) {
-                qw /= q_norm;
-                qx /= q_norm;
-                qy /= q_norm;
-                qz /= q_norm;
-
-                // ROS / mocap: x前、y左、z上；PX4: x前、y右、z下。
-                // VehicleOdometry.q 顺序为 w, x, y, z。
-                odom.q[0] = qw;
-                odom.q[1] = qx;
-                odom.q[2] = invert_y_ ? -qy : qy;
-                odom.q[3] = invert_z_ ? -qz : qz;
-
-                if (odom.q[0] < 0.0f) {
-                    odom.q[0] = -odom.q[0];
-                    odom.q[1] = -odom.q[1];
-                    odom.q[2] = -odom.q[2];
-                    odom.q[3] = -odom.q[3];
-                }
-
-                orientation_valid = true;
-            } else {
-                RCLCPP_WARN_THROTTLE(
-                    this->get_logger(), *this->get_clock(), 1000,
-                    "Invalid mocap orientation quaternion: x=%.6f y=%.6f z=%.6f w=%.6f norm=%.6f, publish NaN orientation",
-                    qx, qy, qz, qw, q_norm);
-            }
-        }
-
-        if (!orientation_valid) {
-            odom.q[0] = nan;
-            odom.q[1] = nan;
-            odom.q[2] = nan;
-            odom.q[3] = nan;
-        }
+        // 暂不融合 NOKOV 姿态/yaw，只发布位置给 PX4。
+        odom.q[0] = nan;
+        odom.q[1] = nan;
+        odom.q[2] = nan;
+        odom.q[3] = nan;
 
         odom.velocity_frame = px4_msgs::msg::VehicleOdometry::VELOCITY_FRAME_UNKNOWN;
         odom.velocity[0] = nan;
@@ -137,15 +94,9 @@ private:
         odom.position_variance[1] = 0.01f;
         odom.position_variance[2] = 0.01f;
 
-        if (orientation_valid) {
-            odom.orientation_variance[0] = orientation_variance_;
-            odom.orientation_variance[1] = orientation_variance_;
-            odom.orientation_variance[2] = orientation_variance_;
-        } else {
-            odom.orientation_variance[0] = nan;
-            odom.orientation_variance[1] = nan;
-            odom.orientation_variance[2] = nan;
-        }
+        odom.orientation_variance[0] = nan;
+        odom.orientation_variance[1] = nan;
+        odom.orientation_variance[2] = nan;
 
         odom.velocity_variance[0] = nan;
         odom.velocity_variance[1] = nan;
@@ -162,8 +113,6 @@ private:
     std::string px4_odom_topic_;
     bool invert_y_;
     bool invert_z_;
-    bool publish_orientation_;
-    float orientation_variance_;
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr mocap_sub_;
     rclcpp::Publisher<px4_msgs::msg::VehicleOdometry>::SharedPtr odom_pub_;
